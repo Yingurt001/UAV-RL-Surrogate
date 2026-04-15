@@ -28,11 +28,11 @@ Real Physics        Neural Surrogate         RL Agent
 
 | Setting | Mean Reward | Episode Length |
 |---------|------------|---------------|
-| A: Real → Real (baseline) | -27.71 ± 2.55 | 3.2 ± 0.4 |
-| B: Surrogate → Surrogate | -27.48 ± 2.80 | 3.1 ± 0.3 |
-| C: Surrogate → Real (transfer) | -27.69 ± 2.75 | 3.1 ± 0.2 |
+| A: Real → Real (baseline) | 1357 ± 48 | 300 (full) |
+| B: Surrogate → Surrogate | 1355 ± 51 | 300 (full) |
+| C: Surrogate → Real (transfer) | 1348 ± 48 | 300 (full) |
 
-**Transfer gap: 0.1%** — the surrogate-trained policy performs nearly identically to the real-trained policy.
+**Transfer gap: 0.6%** — the surrogate-trained policy performs nearly identically to the real-trained policy. The drone successfully navigates to random targets in all settings.
 
 ## Project Structure
 
@@ -47,6 +47,7 @@ Real Physics        Neural Surrogate         RL Agent
 │   ├── train_surrogate.py  # Step 2: Collect data & train surrogate
 │   ├── compare.py          # Step 3: Real vs surrogate comparison
 │   └── visualize.py        # Step 4: Flight trajectory visualization
+├── TUTORIAL.md                 # Step-by-step learning tutorial (Chinese)
 └── requirements.txt
 ```
 
