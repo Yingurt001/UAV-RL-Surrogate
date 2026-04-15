@@ -1,0 +1,6 @@
+stable-baselines3>=2.0
+gymnasium>=1.0
+torch>=2.0
+numpy
+matplotlib
+tensorboard
