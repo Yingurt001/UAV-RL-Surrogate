@@ -82,9 +82,10 @@ def train_and_evaluate(args):
         lambda: Quadrotor2DEnv(randomize_params=True), n_envs=4
     )
     model_real = PPO("MlpPolicy", real_env, verbose=0,
-                     learning_rate=3e-4, n_steps=2048, batch_size=64,
-                     n_epochs=10, gamma=0.99,
-                     policy_kwargs=dict(net_arch=dict(pi=[64, 64], vf=[64, 64])))
+                     learning_rate=3e-4, n_steps=2048, batch_size=256,
+                     n_epochs=10, gamma=0.99, gae_lambda=0.95,
+                     ent_coef=0.005, max_grad_norm=0.5,
+                     policy_kwargs=dict(net_arch=dict(pi=[128, 128], vf=[128, 128])))
     model_real.learn(total_timesteps=args.timesteps, progress_bar=True)
     model_real.save("results/ppo_real")
     real_env.close()
@@ -106,9 +107,10 @@ def train_and_evaluate(args):
 
     surr_env = make_vec_env(lambda: SurrogateEnv(), n_envs=4)
     model_surr = PPO("MlpPolicy", surr_env, verbose=0,
-                     learning_rate=3e-4, n_steps=2048, batch_size=64,
-                     n_epochs=10, gamma=0.99,
-                     policy_kwargs=dict(net_arch=dict(pi=[64, 64], vf=[64, 64])))
+                     learning_rate=3e-4, n_steps=2048, batch_size=256,
+                     n_epochs=10, gamma=0.99, gae_lambda=0.95,
+                     ent_coef=0.005, max_grad_norm=0.5,
+                     policy_kwargs=dict(net_arch=dict(pi=[128, 128], vf=[128, 128])))
     model_surr.learn(total_timesteps=args.timesteps, progress_bar=True)
     model_surr.save("results/ppo_surrogate")
     surr_env.close()

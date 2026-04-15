@@ -58,21 +58,20 @@ class Quadrotor2DEnv(gym.Env):
 
         # --- Observation space ---
         # [x, y, theta, vx, vy, omega, target_x, target_y] = 8-dim
-        # Positions in [-5, 5], velocities in [-10, 10], angle in [-pi, pi]
         obs_high = np.array([5, 5, np.pi, 10, 10, 10, 5, 5], dtype=np.float32)
         self.observation_space = spaces.Box(-obs_high, obs_high, dtype=np.float32)
 
         # --- Simulation ---
-        self.dt = 0.02  # 50 Hz — typical drone control frequency
-        self.max_steps = 500  # 10 seconds per episode
-        self.max_thrust = 15.0  # Newtons — scales the [0,1] action
+        self.dt = 0.02       # 50 Hz — typical drone control frequency
+        self.max_steps = 300  # 6 seconds per episode
+        self.max_thrust = 6.0  # Newtons per motor (hover ≈ 0.41 normalized)
 
         # --- Default physical parameters (will be randomized) ---
         self._default_params = {
-            "mass": 0.5,       # kg
-            "inertia": 0.002,  # kg*m^2 — resistance to rotation
-            "arm_length": 0.1, # m — distance from center to motor
-            "drag": 0.01,      # linear drag coefficient
+            "mass": 0.5,        # kg
+            "inertia": 0.025,   # kg*m^2 — high enough to resist flipping
+            "arm_length": 0.2,  # m — distance from center to motor
+            "drag": 0.2,        # aerodynamic drag — helps natural stabilization
         }
         self.gravity = 9.81
 
@@ -82,7 +81,7 @@ class Quadrotor2DEnv(gym.Env):
 
     def _randomize_physics(self):
         """
-        Randomize physical parameters within ±30% of default.
+        Randomize physical parameters within ±20% of default.
 
         === THINK ABOUT THIS ===
         Q3: What happens if we DON'T randomize?
@@ -90,7 +89,7 @@ class Quadrotor2DEnv(gym.Env):
                heavier drone and it crashes. This is called "sim-to-real gap".
         """
         if self.randomize_params:
-            scale = lambda v: v * self.np_random.uniform(0.7, 1.3)
+            scale = lambda v: v * self.np_random.uniform(0.8, 1.2)
             self.mass = scale(self._default_params["mass"])
             self.inertia = scale(self._default_params["inertia"])
             self.arm_length = scale(self._default_params["arm_length"])
@@ -107,19 +106,20 @@ class Quadrotor2DEnv(gym.Env):
 
         # Start near origin with small random perturbation
         self.state = np.array([
-            self.np_random.uniform(-0.5, 0.5),  # x
-            self.np_random.uniform(-0.5, 0.5),  # y
-            self.np_random.uniform(-0.1, 0.1),  # theta (small initial tilt)
+            self.np_random.uniform(-0.3, 0.3),  # x
+            self.np_random.uniform(0.5, 1.5),    # y — start above ground
+            0.0,                                  # theta — start level
             0.0, 0.0, 0.0                        # zero initial velocity
         ], dtype=np.float64)
 
-        # Random target position
+        # Random target — reachable distance
         self.target = np.array([
-            self.np_random.uniform(-3.0, 3.0),
-            self.np_random.uniform(-3.0, 3.0),
+            self.np_random.uniform(-2.0, 2.0),
+            self.np_random.uniform(0.5, 3.5),  # target always above ground
         ], dtype=np.float64)
 
         self.step_count = 0
+        self._prev_distance = np.linalg.norm(self.state[:2] - self.target)
         return self._get_obs(), {}
 
     def _get_obs(self):
@@ -161,10 +161,10 @@ class Quadrotor2DEnv(gym.Env):
         # Think: thrust pushes "up" relative to the drone, not relative to ground
         ax = -total_thrust * np.sin(theta) / self.mass - self.drag * vx / self.mass
         ay = total_thrust * np.cos(theta) / self.mass - self.gravity - self.drag * vy / self.mass
-        alpha = torque / self.inertia
+        # Angular drag to help stabilize rotation
+        alpha = torque / self.inertia - 0.5 * omega
 
         # Semi-implicit Euler integration
-        # (velocity updated first, then position — more stable than explicit Euler)
         vx_new = vx + ax * self.dt
         vy_new = vy + ay * self.dt
         omega_new = omega + alpha * self.dt
@@ -183,10 +183,11 @@ class Quadrotor2DEnv(gym.Env):
 
         # --- Termination ---
         out_of_bounds = abs(x_new) > 5 or abs(y_new) > 5
-        flipped = abs(theta_new) > np.pi / 2  # drone flipped over
+        hit_ground = y_new < -0.5
+        flipped = abs(theta_new) > 1.2  # ~69 degrees, more forgiving than pi/2
         timed_out = self.step_count >= self.max_steps
 
-        terminated = out_of_bounds or flipped
+        terminated = out_of_bounds or flipped or hit_ground
         truncated = timed_out
 
         return self._get_obs(), reward, terminated, truncated, {}
@@ -201,34 +202,41 @@ class Quadrotor2DEnv(gym.Env):
                We want it to reach the target AND stay stable AND not waste energy.
                This is called "reward shaping" — guiding the agent toward good behavior.
 
-        Components:
-          1. -distance       : get close to target (main objective)
-          2. -|theta|        : stay upright (safety)
-          3. -|omega|        : don't spin wildly (smoothness)
-          4. +bonus          : big reward for reaching target
+        Q6: What is "reward shaping" with a progress term?
+            -> Instead of just penalizing current distance, we reward PROGRESS:
+               if distance decreased since last step, that's positive reward.
+               This gives the agent a clearer signal: "you're going the right way."
         """
         pos = self.state[:2]
         theta = self.state[2]
         omega = self.state[5]
+        vel = self.state[3:5]
 
         distance = np.linalg.norm(pos - self.target)
 
-        # Weighted sum of penalties
+        # Progress reward — did we get closer?
+        progress = self._prev_distance - distance
+        self._prev_distance = distance
+
         reward = (
-            -1.0 * distance           # primary: get close
-            - 0.5 * abs(theta)         # secondary: stay level
-            - 0.1 * abs(omega)         # tertiary: don't spin
+            10.0 * progress               # strong signal for approaching target
+            - 0.3 * abs(theta)             # stay upright
+            - 0.05 * abs(omega)            # smooth rotation
+            - 0.01 * np.linalg.norm(vel)   # don't go too fast
+            + 0.1                          # survival bonus: alive = good
         )
 
-        # Bonus for reaching target (within 0.2m)
-        if distance < 0.2:
+        # Big bonus for reaching target
+        if distance < 0.3:
             reward += 5.0
+        elif distance < 0.8:
+            reward += 1.0
 
-        # Harsh penalty for crashing
-        if abs(self.state[0]) > 5 or abs(self.state[1]) > 5:
-            reward -= 10.0
-        if abs(theta) > np.pi / 2:
-            reward -= 10.0
+        # Crash penalties
+        if abs(self.state[0]) > 5 or abs(self.state[1]) > 5 or self.state[1] < -0.5:
+            reward -= 5.0
+        if abs(theta) > 1.2:
+            reward -= 5.0
 
         return reward
 
@@ -249,27 +257,25 @@ class Quadrotor2DEnv(gym.Env):
         ax = self._ax
         ax.clear()
         ax.set_xlim(-5, 5)
-        ax.set_ylim(-5, 5)
+        ax.set_ylim(-1, 5)
         ax.set_aspect('equal')
         ax.grid(True, alpha=0.3)
         ax.set_title(f'Step {self.step_count}')
+
+        # Draw ground
+        ax.axhline(y=-0.5, color='brown', linewidth=2)
+        ax.fill_between([-5, 5], -1, -0.5, color='burlywood', alpha=0.3)
 
         # Draw target
         ax.plot(*self.target, 'r*', markersize=15, label='Target')
 
         # Draw drone body
         x, y, theta = self.state[:3]
-        L = self.arm_length * 5  # scale for visibility
+        L = self.arm_length * 3  # scale for visibility
         dx = L * np.cos(theta)
         dy = L * np.sin(theta)
         ax.plot([x - dx, x + dx], [y - dy, y + dy], 'b-', linewidth=3)
         ax.plot(x, y, 'ko', markersize=5)
-
-        # Draw thrust arrows
-        ax.annotate('', xy=(x - dx, y - dy + 0.3), xytext=(x - dx, y - dy),
-                     arrowprops=dict(arrowstyle='->', color='orange', lw=2))
-        ax.annotate('', xy=(x + dx, y + dy + 0.3), xytext=(x + dx, y + dy),
-                     arrowprops=dict(arrowstyle='->', color='orange', lw=2))
 
         ax.legend()
         self._fig.canvas.draw()

@@ -96,21 +96,24 @@ def train(args):
     # Evaluation env with FIXED params — measures true performance
     eval_env = make_vec_env(make_env(randomize=False), n_envs=1)
 
-    # PPO with MLP policy (two hidden layers of 64 units)
+    # PPO with MLP policy
     model = PPO(
         "MlpPolicy",
         train_env,
         learning_rate=3e-4,
         n_steps=2048,          # steps per env before update
-        batch_size=64,
+        batch_size=256,
         n_epochs=10,
         gamma=0.99,
+        gae_lambda=0.95,
         clip_range=0.2,
-        ent_coef=0.01,         # entropy bonus — encourages exploration
+        ent_coef=0.005,        # entropy bonus — encourages exploration
+        vf_coef=0.5,
+        max_grad_norm=0.5,
         verbose=1,
         tensorboard_log="./runs/ppo_quadrotor",
         policy_kwargs=dict(
-            net_arch=dict(pi=[64, 64], vf=[64, 64])  # actor and critic networks
+            net_arch=dict(pi=[128, 128], vf=[128, 128])  # bigger networks
         ),
     )
 

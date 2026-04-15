@@ -58,25 +58,26 @@ class SurrogateEnv(gym.Env):
         obs_high = np.array([5, 5, np.pi, 10, 10, 10, 5, 5], dtype=np.float32)
         self.observation_space = spaces.Box(-obs_high, obs_high, dtype=np.float32)
 
-        self.dt = 0.02
-        self.max_steps = 500
+        self.max_steps = 300
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
+        # Identical initialization to Quadrotor2DEnv
         self.state = np.array([
-            self.np_random.uniform(-0.5, 0.5),
-            self.np_random.uniform(-0.5, 0.5),
-            self.np_random.uniform(-0.1, 0.1),
+            self.np_random.uniform(-0.3, 0.3),
+            self.np_random.uniform(0.5, 1.5),
+            0.0,
             0.0, 0.0, 0.0
         ], dtype=np.float64)
 
         self.target = np.array([
-            self.np_random.uniform(-3.0, 3.0),
-            self.np_random.uniform(-3.0, 3.0),
+            self.np_random.uniform(-2.0, 2.0),
+            self.np_random.uniform(0.5, 3.5),
         ], dtype=np.float64)
 
         self.step_count = 0
+        self._prev_distance = np.linalg.norm(self.state[:2] - self.target)
         return self._get_obs(), {}
 
     def _get_obs(self):
@@ -111,10 +112,11 @@ class SurrogateEnv(gym.Env):
         reward = self._compute_reward()
 
         out_of_bounds = abs(self.state[0]) > 5 or abs(self.state[1]) > 5
-        flipped = abs(self.state[2]) > np.pi / 2
+        hit_ground = self.state[1] < -0.5
+        flipped = abs(self.state[2]) > 1.2
         timed_out = self.step_count >= self.max_steps
 
-        terminated = out_of_bounds or flipped
+        terminated = out_of_bounds or flipped or hit_ground
         truncated = timed_out
 
         return self._get_obs(), reward, terminated, truncated, {}
@@ -124,15 +126,29 @@ class SurrogateEnv(gym.Env):
         pos = self.state[:2]
         theta = self.state[2]
         omega = self.state[5]
+        vel = self.state[3:5]
+
         distance = np.linalg.norm(pos - self.target)
 
-        reward = -1.0 * distance - 0.5 * abs(theta) - 0.1 * abs(omega)
+        progress = self._prev_distance - distance
+        self._prev_distance = distance
 
-        if distance < 0.2:
+        reward = (
+            10.0 * progress
+            - 0.3 * abs(theta)
+            - 0.05 * abs(omega)
+            - 0.01 * np.linalg.norm(vel)
+            + 0.1
+        )
+
+        if distance < 0.3:
             reward += 5.0
-        if abs(self.state[0]) > 5 or abs(self.state[1]) > 5:
-            reward -= 10.0
-        if abs(theta) > np.pi / 2:
-            reward -= 10.0
+        elif distance < 0.8:
+            reward += 1.0
+
+        if abs(self.state[0]) > 5 or abs(self.state[1]) > 5 or self.state[1] < -0.5:
+            reward -= 5.0
+        if abs(theta) > 1.2:
+            reward -= 5.0
 
         return reward
