@@ -55,17 +55,17 @@ Real Physics        Neural Surrogate         RL Agent
 
 ```bash
 # Setup
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && pip install tqdm rich
 
 # Step 1: Train PPO agent on the real environment
-python scripts/train_ppo.py --timesteps 200000
+python scripts/train_ppo.py --timesteps 500000
 
 # Step 2: Collect flight data and train surrogate dynamics model
 python scripts/train_surrogate.py
 
 # Step 3: Compare real vs. surrogate RL training
-python scripts/compare.py --timesteps 200000
+python scripts/compare.py --timesteps 500000
 
 # Step 4: Visualize agent behavior
 python scripts/visualize.py

@@ -13,12 +13,24 @@
 
 ```bash
 cd "/Users/zhangying/Personal/Andrea/Academic 学术/Research 研究/UAV project"
-python -m venv venv
-source venv/bin/activate
+
+# 创建虚拟环境
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 安装依赖
+pip install --upgrade pip
 pip install -r requirements.txt
+pip install tqdm rich   # PPO 训练进度条需要
+
+# 清掉旧结果（从头开始）
+rm -rf results/ runs/
+mkdir results
 ```
 
 依赖很轻量：`stable-baselines3`（PPO）、`gymnasium`（RL 接口）、`torch`（神经网络）、`matplotlib`（画图）。
+
+> **注意**: 后面每次打开新终端都要先激活环境：`source .venv/bin/activate`
 
 ---
 
